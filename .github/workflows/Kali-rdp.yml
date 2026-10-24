@@ -1,4 +1,4 @@
-name: Kali Linux RDP (Full GUI Fix)
+name: Kali Linux NetHunter KeX (VNC)
 
 on:
   workflow_dispatch:
@@ -8,23 +8,18 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: kalilinux/kali-rolling
-      # গ্রাফিক্স ও আইকন ক্র্যাশ না করার জন্য --shm-size=2g যোগ করা হয়েছে
       options: --privileged --shm-size=2g
 
     steps:
-      - name: Update & Install Kali XFCE Desktop, Themes and XRDP
+      - name: Install Kali XFCE & TigerVNC (KeX Server)
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             kali-desktop-xfce \
             kali-themes \
-            kali-wallpapers-all \
             elementary-xfce-icon-theme \
-            librsvg2-common \
-            xorg \
-            xorgxrdp \
-            xserver-xorg-core \
-            xrdp \
+            tigervnc-standalone-server \
+            tigervnc-common \
             dbus-x11 \
             curl \
             sudo \
@@ -33,48 +28,31 @@ jobs:
             ca-certificates \
             firefox-esr
 
-      - name: Configure XRDP & Fix GUI Rendering
+      - name: Configure KeX / VNC Server
         run: |
+          # ইউজার ও পাসওয়ার্ড সেটআপ
           useradd -m -s /bin/bash kali || true
           echo "kali:kali123" | chpasswd
           usermod -aG sudo kali
-          echo "root:kali123" | chpasswd
-          adduser xrdp ssl-cert || true
 
-          # কন্টেইনারের ভেতরে Xorg পারমিশন
-          mkdir -p /etc/X11
-          echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
-          echo "needs_root_rights=yes" >> /etc/X11/Xwrapper.config
+          # VNC/KeX পাসওয়ার্ড 'kali123' সেট করা হচ্ছে
+          mkdir -p /home/kali/.vnc
+          echo "kali123" | vncpasswd -f > /home/kali/.vnc/passwd
+          chmod 600 /home/kali/.vnc/passwd
 
-          # আইকন ক্যাশ আপডেট করা (যাতে আইকন মিসিং না থাকে)
-          gtk-update-icon-cache -f /usr/share/icons/* || true
-
-          # /etc/xrdp/startwm.sh ফাইলে Compositor বন্ধ করে XFCE চালু করা
-          cat << 'EOF' > /etc/xrdp/startwm.sh
-          #!/bin/sh
-          if [ -r /etc/default/locale ]; then
-            . /etc/default/locale
-            export LANG LANGUAGE
-          fi
+          # ডেক্সটপ স্টার্টআপ ফাইল তৈরি
+          cat << 'EOF' > /home/kali/.vnc/xstartup
+          #!/bin/bash
+          unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
-          unset XDG_RUNTIME_DIR
-          export DESKTOP_SESSION=xfce
-          export GDMSESSION=xfce
-          export XDG_CURRENT_DESKTOP=XFCE
-          
-          # ব্যাকগ্রাউন্ডে Compositor অফ করা হচ্ছে যাতে কালো স্ক্রিন না আসে
-          (sleep 3 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
-          
           exec dbus-launch --exit-with-session startxfce4
           EOF
-          chmod +x /etc/xrdp/startwm.sh
+          chmod +x /home/kali/.vnc/xstartup
+          chown -R kali:kali /home/kali/.vnc
 
-          # সার্ভিস চালু করা
-          mkdir -p /var/run/dbus
-          dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address || service dbus start
-          service xrdp stop || true
-          rm -rf /var/run/xrdp*.pid
-          service xrdp start
+          # পোর্ট 5901-এ VNC (KeX) সার্ভার চালু করা
+          service dbus start
+          su - kali -c "vncserver :1 -geometry 1280x720 -depth 24 -localhost no"
 
       - name: Install & Connect Tailscale
         env:
@@ -83,16 +61,16 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh || true
           nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > tailscaled.log 2>&1 &
           sleep 5
-          tailscale up --authkey="$TS_KEY" --hostname=kali-github-rdp --accept-routes
+          tailscale up --authkey="$TS_KEY" --hostname=kali-kex --accept-routes
 
-      - name: Get RDP Login Details
+      - name: Get NetHunter KeX Login Details
         run: |
           echo "=========================================="
-          echo "✅ Kali Linux Full GUI RDP Ready!"
-          echo "Tailscale IP Address: $(tailscale ip -4)"
-          echo "Username: kali"
-          echo "Password: kali123"
+          echo "✅ Kali NetHunter KeX Ready!"
+          echo "VNC / KeX Address: $(tailscale ip -4)"
+          echo "Port: 5901"
+          echo "KeX Password: kali123"
           echo "=========================================="
 
-      - name: Keep RDP Alive (Up to 6 Hours)
+      - name: Keep Alive (Up to 6 Hours)
         run: sleep 21000
