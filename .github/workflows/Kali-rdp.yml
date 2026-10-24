@@ -1,4 +1,4 @@
-name: Kali Linux NetHunter KeX (Fixed Connection)
+name: Kali Linux NetHunter KeX (100% Working)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Remove Docker Restrictions & Install Full XFCE
         run: |
-          # আইকন ও থিম ডিলিট হওয়া বন্ধ করার জন্য ডকারের রেস্ট্রিকশন ফাইল মুছে ফেলা হচ্ছে
+          # ডকার যেন আইকন ও থিম ডিলিট না করে তাই রেস্ট্রিকশন ফাইল মুছে ফেলা হচ্ছে
           rm -f /etc/dpkg/dpkg.cfg.d/docker
           rm -f /etc/dpkg/dpkg.cfg.d/excludes
           rm -f /etc/apt/apt.conf.d/docker-*
@@ -44,7 +44,7 @@ jobs:
             ca-certificates \
             firefox-esr
 
-          # আগে থেকে ইনস্টল থাকা প্যাকেজগুলোর মিসিং আইকন রিস্টোর করা
+          # মিসিং আইকন ও থিম রিস্টোর করা
           DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y \
             kali-themes kali-themes-common desktop-base libgtk-3-common xfce4-panel xfdesktop4 xfwm4
 
@@ -58,46 +58,53 @@ jobs:
 
       - name: Start VNC (Port 5901) & RDP (Port 3389)
         run: |
+          export HOME=/root
+          export USER=root
+
           useradd -m -s /bin/bash kali || true
           echo "kali:kali123" | chpasswd
           echo "root:kali123" | chpasswd
           usermod -aG sudo kali
 
-          # root এবং kali উভয় ইউজারের জন্য VNC পাসওয়ার্ড সেটআপ
-          mkdir -p /root/.vnc /home/kali/.vnc
+          # পুরোনো (.vnc) এবং নতুন (.config/tigervnc) উভয় জায়গায় পাসওয়ার্ড ফাইল তৈরি করা হচ্ছে
+          mkdir -p /root/.vnc /root/.config/tigervnc /home/kali/.vnc /home/kali/.config/tigervnc
           echo "kali123" | vncpasswd -f > /root/.vnc/passwd
-          echo "kali123" | vncpasswd -f > /home/kali/.vnc/passwd
-          chmod 600 /root/.vnc/passwd /home/kali/.vnc/passwd
+          cp /root/.vnc/passwd /root/.config/tigervnc/passwd
+          cp /root/.vnc/passwd /home/kali/.vnc/passwd
+          cp /root/.vnc/passwd /home/kali/.config/tigervnc/passwd
+          chmod 600 /root/.vnc/passwd /root/.config/tigervnc/passwd /home/kali/.vnc/passwd /home/kali/.config/tigervnc/passwd
 
-          # সিম্পল এবং ক্র্যাশ-মুক্ত xstartup স্ক্রিপ্ট
+          # স্টার্টআপ ফাইল তৈরি
           cat << 'EOF' > /root/.vnc/xstartup
           #!/bin/bash
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           export XDG_CURRENT_DESKTOP=XFCE
           export DESKTOP_SESSION=xfce
-          (sleep 4 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
+          (sleep 3 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
           exec dbus-launch --exit-with-session startxfce4
           EOF
 
           chmod +x /root/.vnc/xstartup
+          cp /root/.vnc/xstartup /root/.config/tigervnc/xstartup
           cp /root/.vnc/xstartup /home/kali/.vnc/xstartup
-          chown -R kali:kali /home/kali/.vnc
+          cp /root/.vnc/xstartup /home/kali/.config/tigervnc/xstartup
+          chown -R kali:kali /home/kali/.vnc /home/kali/.config
 
           # DBUS চালু করা
           mkdir -p /var/run/dbus
           dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address || service dbus start
 
-          # পুরোনো কোনো লক ফাইল থাকলে মুছে পোর্ট 5901-এ VNC সার্ভার চালু করা
+          # সরাসরি পাসওয়ার্ড ও স্টার্টআপ ফাইল দেখিয়ে দিয়ে পোর্ট 5901-এ VNC সার্ভার চালু করা
           rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1
-          vncserver :1 -geometry 1280x720 -depth 24 -localhost no
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no -rfbauth /root/.vnc/passwd -xstartup /root/.vnc/xstartup
 
           # ব্যাকআপ হিসেবে XRDP (Port 3389)-ও চালু রাখা হলো
           cp /root/.vnc/xstartup /etc/xrdp/startwm.sh
           chmod +x /etc/xrdp/startwm.sh
           service xrdp start || true
 
-          # পোর্ট 5901 চালু আছে কি না তা লগে চেক করা
+          # পোর্ট 5901 চালু হয়েছে কি না তা কনফার্ম করা
           netstat -tulnp | grep 5901
 
       - name: Install & Connect Tailscale
