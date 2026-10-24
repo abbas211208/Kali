@@ -1,0 +1,59 @@
+name: Kali Linux RDP (Tailscale)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: kalilinux/kali-rolling
+      options: --privileged
+
+    steps:
+      - name: Update & Install Kali XFCE Desktop and XRDP
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y kali-desktop-xfce xrdp dbus-x11 curl sudo iproute2 iptables
+
+      - name: Configure XRDP & Set User Password
+        run: |
+          # ইউজার 'kali' তৈরি এবং পাসওয়ার্ড 'kali123' সেট করা হচ্ছে
+          useradd -m -s /bin/bash kali
+          echo "kali:kali123" | chpasswd
+          usermod -aG sudo kali
+          echo "root:kali123" | chpasswd
+          
+          # XFCE ডেক্সটপ সেশন কনফিগার করা
+          echo "xfce4-session" > /home/kali/.xsession
+          chown kali:kali /home/kali/.xsession
+          
+          # সার্ভিস চালু করা
+          service dbus start
+          service xrdp start
+
+      - name: Install & Connect Tailscale
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          
+          # কন্টেইনারের ভেতরে Userspace networking মোডে Tailscale ব্যাকগ্রাউন্ডে চালু করা হচ্ছে
+          nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > tailscaled.log 2>&1 &
+          sleep 5
+          
+          # আপনার Tailscale নেটওয়ার্কে কানেক্ট করা হচ্ছে
+          tailscale up --authkey=$TS_KEY --hostname=kali-github-rdp
+
+      - name: Get RDP Login Details
+        run: |
+          echo "=========================================="
+          echo "✅ Kali Linux RDP Ready!"
+          echo "Tailscale IP Address: $(tailscale ip -4)"
+          echo "Username: kali (অথবা root)"
+          echo "Password: kali123"
+          echo "=========================================="
+
+      - name: Keep RDP Alive (Up to 6 Hours)
+        run: sleep 21000
+        
