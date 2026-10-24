@@ -1,4 +1,4 @@
-name: Kali Linux NetHunter KeX (100% Working)
+name: Kali Linux Dedicated Fast RDP
 
 on:
   workflow_dispatch:
@@ -11,9 +11,9 @@ jobs:
       options: --privileged --shm-size=2g
 
     steps:
-      - name: Remove Docker Restrictions & Install Full XFCE
+      - name: Install Full Kali XFCE & XRDP
         run: |
-          # ডকার যেন আইকন ও থিম ডিলিট না করে তাই রেস্ট্রিকশন ফাইল মুছে ফেলা হচ্ছে
+          # আইকন ও থিম যেন ডিলিট না হয়
           rm -f /etc/dpkg/dpkg.cfg.d/docker
           rm -f /etc/dpkg/dpkg.cfg.d/excludes
           rm -f /etc/apt/apt.conf.d/docker-*
@@ -30,10 +30,10 @@ jobs:
             hicolor-icon-theme \
             librsvg2-common \
             gdk-pixbuf2.0-bin \
-            tigervnc-standalone-server \
-            tigervnc-common \
-            xrdp \
+            xorg \
             xorgxrdp \
+            xserver-xorg-core \
+            xrdp \
             dbus-x11 \
             x11-xserver-utils \
             net-tools \
@@ -44,11 +44,10 @@ jobs:
             ca-certificates \
             firefox-esr
 
-          # মিসিং আইকন ও থিম রিস্টোর করা
+          # মিসিং আইকন রিস্টোর ও ক্যাশ আপডেট
           DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y \
             kali-themes kali-themes-common desktop-base libgtk-3-common xfce4-panel xfdesktop4 xfwm4
 
-          # আইকন ক্যাশ আপডেট
           /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders --update-cache || true
           for dir in /usr/share/icons/*; do
             if [ -d "$dir" ]; then
@@ -56,56 +55,47 @@ jobs:
             fi
           done
 
-      - name: Start VNC (Port 5901) & RDP (Port 3389)
+      - name: Configure & Force Start XRDP (Port 3389)
         run: |
-          export HOME=/root
-          export USER=root
-
           useradd -m -s /bin/bash kali || true
           echo "kali:kali123" | chpasswd
           echo "root:kali123" | chpasswd
           usermod -aG sudo kali
+          adduser xrdp ssl-cert || true
 
-          # পুরোনো (.vnc) এবং নতুন (.config/tigervnc) উভয় জায়গায় পাসওয়ার্ড ফাইল তৈরি করা হচ্ছে
-          mkdir -p /root/.vnc /root/.config/tigervnc /home/kali/.vnc /home/kali/.config/tigervnc
-          echo "kali123" | vncpasswd -f > /root/.vnc/passwd
-          cp /root/.vnc/passwd /root/.config/tigervnc/passwd
-          cp /root/.vnc/passwd /home/kali/.vnc/passwd
-          cp /root/.vnc/passwd /home/kali/.config/tigervnc/passwd
-          chmod 600 /root/.vnc/passwd /root/.config/tigervnc/passwd /home/kali/.vnc/passwd /home/kali/.config/tigervnc/passwd
+          # কন্টেইনারে Xorg পারমিশন দেওয়া
+          mkdir -p /etc/X11
+          echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
+          echo "needs_root_rights=yes" >> /etc/X11/Xwrapper.config
 
-          # স্টার্টআপ ফাইল তৈরি
-          cat << 'EOF' > /root/.vnc/xstartup
+          # ডেক্সটপ স্টার্টআপ স্ক্রিপ্ট (স্মুথ পারফরম্যান্সের জন্য Compositor অফ রাখা হয়েছে)
+          cat << 'EOF' > /etc/xrdp/startwm.sh
           #!/bin/bash
-          unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
+          unset XDG_RUNTIME_DIR
           export XDG_CURRENT_DESKTOP=XFCE
           export DESKTOP_SESSION=xfce
           (sleep 3 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
           exec dbus-launch --exit-with-session startxfce4
           EOF
-
-          chmod +x /root/.vnc/xstartup
-          cp /root/.vnc/xstartup /root/.config/tigervnc/xstartup
-          cp /root/.vnc/xstartup /home/kali/.vnc/xstartup
-          cp /root/.vnc/xstartup /home/kali/.config/tigervnc/xstartup
-          chown -R kali:kali /home/kali/.vnc /home/kali/.config
+          chmod +x /etc/xrdp/startwm.sh
 
           # DBUS চালু করা
           mkdir -p /var/run/dbus
           dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address || service dbus start
 
-          # সরাসরি পাসওয়ার্ড ও স্টার্টআপ ফাইল দেখিয়ে দিয়ে পোর্ট 5901-এ VNC সার্ভার চালু করা
-          rm -rf /tmp/.X1-lock /tmp/.X11-unix/X1
-          vncserver :1 -geometry 1280x720 -depth 24 -localhost no -rfbauth /root/.vnc/passwd -xstartup /root/.vnc/xstartup
+          # XRDP কী-জেনারেশন এবং সরাসরি বাইনারি রান করা (যাতে কখনো বন্ধ না হয়)
+          rm -rf /var/run/xrdp*.pid /var/run/xrdp/*.pid
+          mkdir -p /var/run/xrdp
+          chown -R xrdp:xrdp /var/run/xrdp
+          xrdp-keygen xrdp auto || true
+          
+          /usr/sbin/xrdp-sesman
+          /usr/sbin/xrdp
 
-          # ব্যাকআপ হিসেবে XRDP (Port 3389)-ও চালু রাখা হলো
-          cp /root/.vnc/xstartup /etc/xrdp/startwm.sh
-          chmod +x /etc/xrdp/startwm.sh
-          service xrdp start || true
-
-          # পোর্ট 5901 চালু হয়েছে কি না তা কনফার্ম করা
-          netstat -tulnp | grep 5901
+          # পোর্ট 3389 চালু হয়েছে কি না তা কনফার্ম করা
+          sleep 2
+          netstat -tulnp | grep 3389
 
       - name: Install & Connect Tailscale
         env:
@@ -114,16 +104,15 @@ jobs:
           curl -fsSL https://tailscale.com/install.sh | sh || true
           nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > tailscaled.log 2>&1 &
           sleep 5
-          tailscale up --authkey="$TS_KEY" --hostname=kali-kex --accept-routes
+          tailscale up --authkey="$TS_KEY" --hostname=kali-rdp --accept-routes
 
-      - name: Get NetHunter KeX Login Details
+      - name: Get RDP Login Details
         run: |
           echo "=========================================="
-          echo "✅ Kali NetHunter KeX & RDP Ready!"
-          echo "New Tailscale IP: $(tailscale ip -4)"
-          echo "NetHunter KeX Port: 5901"
-          echo "RDP Port: 3389"
-          echo "Username: root (অথবা kali)"
+          echo "✅ Kali Linux RDP Server Running on Port 3389!"
+          echo "Host / IP: $(tailscale ip -4)"
+          echo "Port: 3389"
+          echo "Username: kali (অথবা root)"
           echo "Password: kali123"
           echo "=========================================="
 
