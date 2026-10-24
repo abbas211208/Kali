@@ -1,4 +1,4 @@
-name: Kali Linux NetHunter KeX (VNC)
+name: Kali Linux NetHunter KeX (100% Full GUI Fix)
 
 on:
   workflow_dispatch:
@@ -11,21 +11,31 @@ jobs:
       options: --privileged --shm-size=2g
 
     steps:
-      - name: Fix Mirror & Install Kali XFCE + TigerVNC (KeX)
+      - name: Remove Docker Restrictions & Install Full XFCE
         run: |
-          # ডাউন হওয়া মিররের বদলে ফাস্ট ও আনলিমিটেড Cloudflare মিরর সেট করা হচ্ছে
+          # ১. সবচাইতে গুরুত্বপূর্ণ ধাপ: Docker যেন আইকন ও থিম ডিলিট না করে তাই এই ফাইলগুলো মুছে ফেলা হচ্ছে
+          rm -f /etc/dpkg/dpkg.cfg.d/docker
+          rm -f /etc/dpkg/dpkg.cfg.d/excludes
+          rm -f /etc/apt/apt.conf.d/docker-*
+
+          # ২. Cloudflare ফাস্ট মিরর সেট করা
           echo "deb http://kali.download/kali kali-rolling main contrib non-free non-free-firmware" > /etc/apt/sources.list
-          
           apt-get update -o Acquire::Retries=3
-          
-          # কোনো ফাইল মিস হলে অটো রিট্রাই এবং ফিক্স করার অপশনসহ ইনস্টল
+
+          # ৩. ডেক্সটপ, আইকন ও থিম ইনস্টল করা
           DEBIAN_FRONTEND=noninteractive apt-get install -y -o Acquire::Retries=3 --fix-missing \
             kali-desktop-xfce \
             kali-themes \
+            kali-wallpapers-all \
             elementary-xfce-icon-theme \
+            adwaita-icon-theme-full \
+            hicolor-icon-theme \
+            librsvg2-common \
+            gdk-pixbuf2.0-bin \
             tigervnc-standalone-server \
             tigervnc-common \
             dbus-x11 \
+            x11-xserver-utils \
             curl \
             sudo \
             iproute2 \
@@ -33,30 +43,49 @@ jobs:
             ca-certificates \
             firefox-esr
 
+          # ৪. আগে থেকে ইনস্টল থাকা বেসিক প্যাকেজগুলোর মিসিং ফাইল রিস্টোর করা
+          DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y \
+            kali-themes kali-themes-common desktop-base libgtk-3-common xfce4-panel xfdesktop4 xfwm4
+
+          # ৫. আইকন ও ছবি লোডার ক্যাশ আপডেট করা
+          /usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/gdk-pixbuf-query-loaders --update-cache || true
+          for dir in /usr/share/icons/*; do
+            if [ -d "$dir" ]; then
+              gtk-update-icon-cache -f -t "$dir" || true
+            fi
+          done
+
       - name: Configure KeX / VNC Server
         run: |
-          # ইউজার ও পাসওয়ার্ড সেটআপ
           useradd -m -s /bin/bash kali || true
           echo "kali:kali123" | chpasswd
           usermod -aG sudo kali
 
-          # VNC/KeX পাসওয়ার্ড 'kali123' সেট করা হচ্ছে
           mkdir -p /home/kali/.vnc
           echo "kali123" | vncpasswd -f > /home/kali/.vnc/passwd
           chmod 600 /home/kali/.vnc/passwd
 
-          # ডেক্সটপ স্টার্টআপ ফাইল তৈরি (সাথে Compositor অফ করা যাতে স্ক্রিন কালো না হয়)
+          # সরাসরি Window Manager, Panel এবং Wallpaper চালু করার স্ক্রিপ্ট
           cat << 'EOF' > /home/kali/.vnc/xstartup
           #!/bin/bash
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
-          (sleep 3 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
-          exec dbus-launch --exit-with-session startxfce4
+          export XDG_CURRENT_DESKTOP=XFCE
+          export DESKTOP_SESSION=xfce
+
+          eval $(dbus-launch --sh-syntax)
+
+          # কালো স্ক্রিন এড়াতে Compositor বন্ধ করে উইন্ডো ম্যানেজার, প্যানেল ও ডেক্সটপ চালু করা
+          xfwm4 --compositor=off --daemon &
+          xfsettingsd --daemon &
+          xfce4-panel --daemon &
+          xfdesktop &
+
+          exec xfce4-session
           EOF
           chmod +x /home/kali/.vnc/xstartup
           chown -R kali:kali /home/kali/.vnc
 
-          # পোর্ট 5901-এ VNC (KeX) সার্ভার চালু করা
           mkdir -p /var/run/dbus
           dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address || service dbus start
           su - kali -c "vncserver :1 -geometry 1280x720 -depth 24 -localhost no"
@@ -73,7 +102,7 @@ jobs:
       - name: Get NetHunter KeX Login Details
         run: |
           echo "=========================================="
-          echo "✅ Kali NetHunter KeX Ready!"
+          echo "✅ Kali NetHunter KeX Ready (Full Icons & Panel)!"
           echo "VNC / KeX Address: $(tailscale ip -4)"
           echo "Port: 5901"
           echo "KeX Password: kali123"
