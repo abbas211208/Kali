@@ -11,10 +11,15 @@ jobs:
       options: --privileged --shm-size=2g
 
     steps:
-      - name: Install Kali XFCE & TigerVNC (KeX Server)
+      - name: Fix Mirror & Install Kali XFCE + TigerVNC (KeX)
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          # ডাউন হওয়া মিররের বদলে ফাস্ট ও আনলিমিটেড Cloudflare মিরর সেট করা হচ্ছে
+          echo "deb http://kali.download/kali kali-rolling main contrib non-free non-free-firmware" > /etc/apt/sources.list
+          
+          apt-get update -o Acquire::Retries=3
+          
+          # কোনো ফাইল মিস হলে অটো রিট্রাই এবং ফিক্স করার অপশনসহ ইনস্টল
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -o Acquire::Retries=3 --fix-missing \
             kali-desktop-xfce \
             kali-themes \
             elementary-xfce-icon-theme \
@@ -40,18 +45,20 @@ jobs:
           echo "kali123" | vncpasswd -f > /home/kali/.vnc/passwd
           chmod 600 /home/kali/.vnc/passwd
 
-          # ডেক্সটপ স্টার্টআপ ফাইল তৈরি
+          # ডেক্সটপ স্টার্টআপ ফাইল তৈরি (সাথে Compositor অফ করা যাতে স্ক্রিন কালো না হয়)
           cat << 'EOF' > /home/kali/.vnc/xstartup
           #!/bin/bash
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
+          (sleep 3 && xfconf-query -c xfwm4 -p /general/use_compositing -s false) &
           exec dbus-launch --exit-with-session startxfce4
           EOF
           chmod +x /home/kali/.vnc/xstartup
           chown -R kali:kali /home/kali/.vnc
 
           # পোর্ট 5901-এ VNC (KeX) সার্ভার চালু করা
-          service dbus start
+          mkdir -p /var/run/dbus
+          dbus-daemon --config-file=/usr/share/dbus-1/system.conf --print-address || service dbus start
           su - kali -c "vncserver :1 -geometry 1280x720 -depth 24 -localhost no"
 
       - name: Install & Connect Tailscale
